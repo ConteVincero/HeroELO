@@ -3,7 +3,8 @@
 clear all
 HeroList = cell(1,130);
 PlayerList = cell(130,1);
-Score = zeros(1000);
+Score = zeros(10000,120);
+Games = zeros(10000,120);
 
 %Open the file and write the data into the cell array MatchData
 fileID = fopen('data.csv');
@@ -14,57 +15,130 @@ fclose(fileID);
 
 Heroes = MatchData{1,3};    %Import the Hero data into the Heros array
 Players = MatchData{1,2};   %Import the Player data into the Heros array
+Match = MatchData{1,10};    %Mainly useful for finding matches when debugging
 Side = MatchData{1,11};   %Import the Side data into the Heros array
 Winner = MatchData{1,12};   %Import the Winner data into the Heros array
-Elo = MatchData{1,13};   %Import the Winner data into the Heros array
 
 DataSize = size(Heroes);    %Get the number of records
 
 %Get a list of all the unique heros
 HeroMax = 0;
 PlayerMax = 0;
-for i = 2:DataSize
-    %Grabs the ELO gain from that particular match
-    Gain=str2double(Elo(i));
-    
-    %Finds the player in the list or adds it if it isn't there
+h = waitbar(0,'Calculating...');
+l = 0;
+K = 60;
+correct = 0;
+wrong = 0;
+
+for i = DataSize:-1:2
+    l = l+1;
+    %Finds the hero in the list or adds it if it isn't there
     %NOT EFFICIENT
-    HeroMarker = 0;
+    HeroMarker(l) = 0;
     for j = 1:HeroMax
         if strcmp(Heroes(i),HeroList(j)) ~= 0
-            HeroMarker =j;
+            HeroMarker(l) =j;
             break
         end
     end
-    if HeroMarker ==0
+    if HeroMarker(l) ==0
         HeroMax = HeroMax +1;
         HeroList(HeroMax) = Heroes(i);
-        HeroMarker = HeroMax;
+        HeroMarker(l) = HeroMax;
     end
     
     %Finds the player in the list or adds it if it isn't there
     %NOT EFFICIENT
-    PlayerMarker = 0;
+    PlayerMarker(l) = 0;
     for j = 1:PlayerMax
         if strcmp(Players(i),PlayerList(j)) ~= 0
-            PlayerMarker =j;
+            PlayerMarker(l) =j; %Once found the position is marked and their ELO stored
+            if Score(PlayerMarker(l),HeroMarker(l)) ==0
+                if sum(Score(:,HeroMarker(l))) == 0                      %This should only be called if this is the first game on that hero
+                    Score(PlayerMarker(l),HeroMarker(l))=ELO(PlayerMarker(l));
+                else
+                    Score(PlayerMarker(l),HeroMarker(l))=(ELO(PlayerMarker(l))+	sum(Score(:,HeroMarker(l)))/sum(Score(:,HeroMarker(l))~=0))/2;
+                end
+            end
+            tempELO(l) = Score(PlayerMarker(l),HeroMarker(l));      %The ELO for that hero is used is availible
             break
         end
     end
-    if PlayerMarker ==0
+    if PlayerMarker(l) ==0
         PlayerMax = PlayerMax +1;
-        PlayerList(PlayerMax) = Players(i);
-        PlayerMarker = PlayerMax;
+        PlayerList(PlayerMax,1) = Players(i);
+        PlayerMarker(l) = PlayerMax;
+        Score(PlayerMarker(l),HeroMarker(l))=1000;
+        ELO(PlayerMax,1) = 1000;
+        tempELO(l) = ELO(PlayerMax);
     end
     
-    %Update the master array with the gain for that hero
-    Score(PlayerMarker,HeroMarker)=Score(PlayerMarker,HeroMarker)+Gain;
+    if l == 10  %Once all 10 people in the game have been found, the ELO gain can be calculated
+        dELO = mean(tempELO(1:5));
+        rELO = mean(tempELO(6:10));
+        
+        rExp = 1/(1+10^((dELO-rELO)/400));  %The expected win probability for Radiant and Dire. I coppied this formula off Wikipedia, sue me.
+        dExp = 1/(1+10^((rELO-dELO)/400));
+        
+        if strcmpi(Winner(i),'Radiant')~=0  %The change in rating is now calculated, and kept seperate so that these can be used to update individual records
+            rGain=K*(1-rExp);  %The K rating is set at the start
+            dGain=K*(0-dExp);
+            if rExp>0.5
+                correct = correct +1;
+            else
+                if rExp ~= 0.5
+                    wrong = wrong +1;
+                end
+            end
+        else
+            rGain=K*(0-rExp);
+            dGain=K*(1-dExp);
+            if dExp>0.5
+                correct = correct +1;
+            else
+                if dExp ~= 0.5
+                    wrong = wrong +1;
+                end
+            end
+        end
+        ELOgain(i+4:i)=rGain;           %The ELO gains are saved
+        ELOgain(i+9:i+10)=dGain;
+        for l=1:5
+            ELO(PlayerMarker(l))=ELO(PlayerMarker(l))+dGain;
+            Score(PlayerMarker(l),HeroMarker(l))=Score(PlayerMarker(l),HeroMarker(l))+dGain;
+            Games(PlayerMarker(l),HeroMarker(l))=Games(PlayerMarker(l),HeroMarker(l))+1;
+        end
+        for l=6:10
+            ELO(PlayerMarker(l))=ELO(PlayerMarker(l))+rGain;
+            Score(PlayerMarker(l),HeroMarker(l))=Score(PlayerMarker(l),HeroMarker(l))+rGain;
+            Games(PlayerMarker(l),HeroMarker(l))=Games(PlayerMarker(l),HeroMarker(l))+1;
+        end
+        l=0;
+    end
+    waitbar(((DataSize(1)-i-2)/DataSize(1)),h);
+    
 end
+fprintf('%i gives %f %% of games correct \n',K,(correct/(correct+wrong))*100)
+waitbar(1,h,'Writing results to file.');
 
 %Write the results to an .xls file
-ColMax1 = fix(HeroMax/26);  %This creates an Excel Row reference to make sure that the headers are in the right place.
-ColMax2 = rem(HeroMax,26);
+ColMax1 = fix((HeroMax+1)/26);  %This creates an Excel Row reference to make sure that the headers are in the right place.
+ColMax2 = rem((HeroMax+1),26);
 ColMax = strcat(char(ColMax1+64),char(ColMax2+64));
-xlswrite('PlayerHero.xlsx',HeroList,strcat('B1:',ColMax,'1'))
-xlswrite('PlayerHero.xlsx',PlayerList,strcat('A2:A',num2str(PlayerMax)))
-xlswrite('PlayerHero.xlsx',Score,strcat('B2:',ColMax,num2str(PlayerMax)))
+
+xlswrite('PlayerHero2.xlsx',HeroList,strcat('B1:',ColMax,'1'))
+xlswrite('PlayerHero2.xlsx',PlayerList,strcat('A2:A',num2str(PlayerMax+1)))
+xlswrite('PlayerHero2.xlsx',Score,strcat('B2:',ColMax,num2str(PlayerMax+1)))
+
+%This just generates a simple file showing the player rankings. It is of no
+%further interest apart from for science.
+xlswrite('PlayerRankings.xlsx',{'Player'},strcat('A1:A1'))
+xlswrite('PlayerRankings.xlsx',{'Rating'},strcat('B1:B1'))
+xlswrite('PlayerRankings.xlsx',PlayerList,strcat('A2:A',num2str(PlayerMax+1)))
+xlswrite('PlayerRankings.xlsx',ELO,strcat('B2:B',num2str(PlayerMax+1)))
+
+
+xlswrite('PlayerHero2.xlsx',HeroList,'Games Played',strcat('B1:',ColMax,'1'))
+xlswrite('PlayerHero2.xlsx',PlayerList,'Games Played',strcat('A2:A',num2str(PlayerMax+1)))
+xlswrite('PlayerHero2.xlsx',Games,'Games Played',strcat('B2:',ColMax,num2str(PlayerMax+1)))
+close(h)
