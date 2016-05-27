@@ -1,5 +1,5 @@
 %
-%This program Calculates the ELO score for each game
+%This program Calculates the ELO score for each team
 %
 Clear all
 %Teams = cell(100,1);
@@ -21,6 +21,9 @@ rGain = zeros(Games);
 dGain = zeros(Games);
 rMMR = zeros(Games);
 dMMR = zeros(Games);
+K = 50;
+Brier = 0;
+h = waitbar(0,'Calculating...');
 
 for i = Games:-1:2
     j = 1;
@@ -66,11 +69,13 @@ for i = Games:-1:2
     dExp = 1/(1+10^((rELO-dELO)/400));
     
     if strcmpi(Winner(i),'Radiant')~=0  %The change in rating is now calculated, and kept seperate so that these can be used to update individual records
-        rGain(i)=100*(1-rExp);  %A K-rating of 100 is used so for an even match the change will be +-50
-        dGain(i)=100*(0-dExp);
+        rGain(i)=K*(1-rExp);  
+        dGain(i)=K*(0-dExp);
+        Brier(i) = (rExp-1)^2; 
     else
-        rGain(i)=100*(0-rExp);
-        dGain(i)=100*(1-dExp);
+        rGain(i)=K*(0-rExp);
+        dGain(i)=K*(1-dExp);
+        Brier(i) = (rExp-0)^2;
     end  
     
     rMMR(i) = rELO+rGain(i);    %The overall ratings are now updated as well
@@ -78,12 +83,16 @@ for i = Games:-1:2
     dMMR(i)= dELO+dGain(i);
     Ratings(dFlag) = dMMR(i);
     clc
-    fprintf('%f %%',(Games-i)/Games*100)    %Progress tracker
+    waitbar(((Games-i-2)/DataSize(1)),h);
 end
+
+fprintf('Brier score is %f \n',sum(Brier)/Games)
+
 %The data is now written to excel files!
 %GameELO contains the columns that will be used to update the datdota game
 %data file
 %this code has never actually worked as the data size is too big
+waitbar(0,h,'Writing results to file.');
 xlswrite('gameELO.xlsx',rGain,strcat('A1:A',Games))
 xlswrite('gameELO.xlsx',dGain,strcat('B1:B',Games))
 xlswrite('gameELO.xlsx',rMMR,strcat('C1:C',Games))
@@ -93,3 +102,4 @@ xlswrite('gameELO.xlsx',dMMR,strcat('D1:D',Games))
 %further interest apart from for science.
 xlswrite('Rankings.xlsx',Teams,strcat('1:1'))
 xlswrite('Rankings.xlsx',Ratings,strcat('2:2'))
+close(h)
